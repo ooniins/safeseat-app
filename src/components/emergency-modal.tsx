@@ -2,6 +2,7 @@ import type { SeatVitals } from "@/components/seat-card";
 import { FontSize as fontsize, Spacing as spacing, type ThemePalette } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useUserPreferences } from "@/hooks/user-preferences-context";
+import { sendEmergencySms } from "@/services/sms-escalation";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -41,6 +42,8 @@ type Props = {
   vitals?: SeatVitals;
   alertAcknowledged?: boolean;
   onAcknowledgeAlert?: () => void;
+  /** True only when the emergency comes from a real Main Hub fusion state (not a UAT simulation). */
+  isRealEmergency?: boolean;
 };
 
 const LOCAL_EMERGENCY_CONTACTS_KEY = "app_emergency_contacts";
@@ -70,6 +73,7 @@ export default function EmergencyModal({
   vitals,
   alertAcknowledged = false,
   onAcknowledgeAlert,
+  isRealEmergency = false,
 }: Props) {
   const themes = useTheme();
   const styles = createStyles(themes);
@@ -86,6 +90,7 @@ export default function EmergencyModal({
   const [windowElapsed, setWindowElapsed] = useState(false);
   const [holdingCancel, setHoldingCancel] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const smsSentRef = useRef(false);
 
   const clearHoldTimer = () => {
     if (holdTimerRef.current) {
@@ -104,6 +109,7 @@ export default function EmergencyModal({
     setSecondsLeft(escalationWindowSeconds);
     setWindowElapsed(false);
     setHoldingCancel(false);
+    smsSentRef.current = false;
   }, [visible, seat, escalationWindowSeconds]);
 
   useEffect(() => {
@@ -125,6 +131,40 @@ export default function EmergencyModal({
   }, [visible, windowElapsed, isDriverSeat, emergencyEscalation]);
 
   useEffect(() => () => clearHoldTimer(), []);
+
+  // ---- SMS escalation: fire once when the countdown elapses for driver seat ----
+  useEffect(() => {
+    if (!visible || !windowElapsed || !isDriverSeat || !emergencyEscalation || !isRealEmergency) return;
+    if (smsSentRef.current) return;
+    smsSentRef.current = true;
+
+    void (async () => {
+      try {
+        const result = await sendEmergencySms({
+          seatNumber: seat,
+          occupantName: isAccountOwner ? "the account owner" : name,
+        });
+        if (result.ok) {
+          if (result.skipped) {
+            console.log(`SafeSeat SMS skipped: ${result.skipped}`);
+          } else {
+            console.log(`SafeSeat SMS sent to ${result.sentTo} (ID: ${result.messageId})`);
+          }
+        } else {
+          console.warn("SafeSeat SMS failed:", result.error);
+        }
+      } catch (error) {
+        console.error("SafeSeat SMS escalation error:", error);
+      }
+    })();
+  }, [visible, windowElapsed, isDriverSeat, emergencyEscalation, isRealEmergency, seat, isAccountOwner, name]);
+
+  // Reset the SMS sent flag when the modal closes
+  useEffect(() => {
+    if (!visible) {
+      smsSentRef.current = false;
+    }
+  }, [visible]);
 
   const fetchEmergencyContacts = async () => {
     setLoadingContacts(true);
@@ -278,8 +318,8 @@ export default function EmergencyModal({
     : !emergencyEscalation
       ? "Driver Emergency SMS is turned off in Settings."
       : windowElapsed
-        ? "Driver-seat escalation window elapsed. Automated SMS is now eligible for the primary emergency contact when the configured backend is connected."
-        : "If the Driver-seat emergency remains confirmed when this timer reaches zero, automated SMS becomes eligible for the primary emergency contact.";
+        ? "Driver-seat escalation window elapsed. Automated SMS has been sent to the primary emergency contact."
+        : "If the Driver-seat emergency remains confirmed when this timer reaches zero, automated SMS will be sent to the primary emergency contact.";
 
   return (
     <>
@@ -475,7 +515,7 @@ export default function EmergencyModal({
               <View style={{ flex: 1 }}>
                 <Text style={styles.contactTitle}>Emergency Contacts</Text>
                 <Text style={styles.contactSubtitle}>
-                  These are manual dialer shortcuts. Automated escalation, when later connected, is SMS only.
+                  These are manual dialer shortcuts. Automated SMS escalation runs in the background when the driver emergency countdown elapses.
                 </Text>
               </View>
               <Pressable

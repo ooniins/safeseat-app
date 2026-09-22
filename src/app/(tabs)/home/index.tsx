@@ -130,6 +130,7 @@ export default function Home() {
     telemetryReady,
     status: hubStatus,
     seatState: hubSeatState,
+    rawSeatState,
     simulationActive,
     resetDecisionLatch,
     setSimulationState,
@@ -848,6 +849,7 @@ export default function Home() {
             vitals={vitalSigns}
             alertAcknowledged={emergencyAlertAcknowledged}
             onAcknowledgeAlert={acknowledgeEmergencyAlert}
+            isRealEmergency={rawSeatState === "emergency" && !simulationActive}
           />
         ) : null}
       </SafeAreaView>
