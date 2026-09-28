@@ -80,7 +80,11 @@ async function sendInfobipSms(
   text: string,
 ): Promise<{ messageId: string }> {
   const apiKey = process.env.INFOBIP_API_KEY;
-  const baseUrl = process.env.INFOBIP_API_BASE_URL ?? "api.infobip.com";
+  const configuredBaseUrl = process.env.INFOBIP_API_BASE_URL ?? "api.infobip.com";
+  const baseUrl = configuredBaseUrl
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/$/, "");
+  const sender = process.env.INFOBIP_SENDER ?? "ServiceSMS";
 
   if (!apiKey) {
     throw new Error("INFOBIP_API_KEY environment variable is missing");
@@ -96,7 +100,7 @@ async function sendInfobipSms(
     body: JSON.stringify({
       messages: [
         {
-          from: "SafeSeat",
+          from: sender,
           to,
           text,
         },

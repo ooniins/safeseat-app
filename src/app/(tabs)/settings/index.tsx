@@ -21,6 +21,7 @@ import ChangePhoneModal from "@/components/change-phone-modal";
 import EscalationWindowControl from "@/components/escalation-window-control";
 import SettingPageItem from "@/components/setting-page-item";
 import SettingSwitch from "@/components/setting-switch";
+import { sendEmergencySms } from "@/services/sms-escalation";
 import { auth, db } from "../../../firebase";
 
 const IS_LOCKED_IN_KEY = "isLockedIn";
@@ -50,6 +51,7 @@ export default function Settings() {
   const [activeSection, setActiveSection] = useState<SectionKey>("account");
   const [changePhoneVisible, setChangePhoneVisible] = useState(false);
   const [changePassVisible, setChangePassVisible] = useState(false);
+  const [testingSms, setTestingSms] = useState(false);
 
   const {
     emergencyEscalation, setEmergencyEscalation,
@@ -134,6 +136,85 @@ export default function Settings() {
     ]);
   };
 
+  const runSmsBackendTest = async () => {
+    if (testingSms) return;
+
+    setTestingSms(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const result = await sendEmergencySms({
+        seatNumber: 1,
+        occupantName: "SafeSeat Test Driver",
+      });
+
+      if (!result.ok) {
+        Alert.alert(
+          "SMS test failed",
+          result.error,
+        );
+        return;
+      }
+
+      if (result.skipped === "test_mode") {
+        Alert.alert(
+          "Backend test successful",
+          "The app authenticated with Firebase and reached the SMS backend. Vercel TEST_MODE is ON, so no real SMS was sent.",
+        );
+        return;
+      }
+
+      if (result.skipped === "no_contacts") {
+        Alert.alert(
+          "No emergency contacts",
+          "Add at least one emergency contact before testing SMS delivery.",
+        );
+        return;
+      }
+
+      if (result.skipped === "no_phone_number") {
+        Alert.alert(
+          "No usable phone number",
+          "The highest-priority emergency contact does not have a usable phone number.",
+        );
+        return;
+      }
+
+      if (result.skipped === "duplicate_event") {
+        Alert.alert(
+          "Duplicate test ignored",
+          "The backend correctly ignored a duplicate emergency event.",
+        );
+        return;
+      }
+
+      Alert.alert(
+        "SMS request accepted",
+        result.sentTo
+          ? `Infobip accepted the emergency SMS for ${result.sentTo}.${result.messageId ? `\n\nMessage ID: ${result.messageId}` : ""}`
+          : "The SMS backend completed successfully.",
+      );
+    } catch (error) {
+      Alert.alert(
+        "SMS test failed",
+        error instanceof Error ? error.message : "Unexpected error while testing the SMS backend.",
+      );
+    } finally {
+      setTestingSms(false);
+    }
+  };
+
+  const handleSmsBackendTest = () => {
+    Alert.alert(
+      "Test Emergency SMS",
+      "This is a temporary developer test. If Vercel TEST_MODE is OFF, this can send a real SMS to your highest-priority emergency contact. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Run test", onPress: () => void runSmsBackendTest() },
+      ],
+    );
+  };
+
   const shortcut = (label: string, key: SectionKey) => {
     const selected = activeSection === key;
     return (
@@ -202,6 +283,18 @@ export default function Settings() {
             <View style={styles.settingGroup}>
               <SettingPageItem name="Profiles & Emergency Contacts" iconName="people-outline" onPress={() => router.push("/(tabs)/everyone" as any)} showChevron isLast />
             </View>
+            <View style={styles.settingGroup}>
+              <SettingPageItem
+                name="Test Emergency SMS"
+                iconName="flask-outline"
+                value={testingSms ? "Testing…" : "Developer test"}
+                enabled={!testingSms}
+                onPress={handleSmsBackendTest}
+                showChevron
+                isLast
+              />
+            </View>
+            <Text style={styles.note}>Temporary test control. Remove before the final release. Vercel TEST_MODE decides whether the request is simulated or actually sent.</Text>
           </View>
 
           <View onLayout={(e) => { sectionY.current.system = e.nativeEvent.layout.y; }} style={styles.section}>
