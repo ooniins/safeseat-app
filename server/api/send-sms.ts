@@ -73,6 +73,35 @@ function buildSmsBody(
 }
 
 // ---------------------------------------------------------------------------
+// Phone normalization
+// ---------------------------------------------------------------------------
+function normalizeSmsDestination(rawPhone: string): string {
+  let phone = rawPhone.trim().replace(/[\s()\-.]/g, "");
+
+  // Infobip examples use international digits without a leading `+`.
+  if (phone.startsWith("+")) phone = phone.slice(1);
+
+  // Philippine local mobile format: 09XXXXXXXXX -> 639XXXXXXXXX
+  if (/^09\d{9}$/.test(phone)) {
+    phone = `63${phone.slice(1)}`;
+  }
+
+  // Convenience for a PH mobile number saved as 9XXXXXXXXX.
+  if (/^9\d{9}$/.test(phone)) {
+    phone = `63${phone}`;
+  }
+
+  // E.164 allows up to 15 digits. We send digits only to Infobip.
+  if (!/^[1-9]\d{7,14}$/.test(phone)) {
+    throw new Error(
+      "Emergency contact phone number is invalid. Use an international number such as +639171234567.",
+    );
+  }
+
+  return phone;
+}
+
+// ---------------------------------------------------------------------------
 // Infobip SMS sending (REST API)
 // ---------------------------------------------------------------------------
 async function sendInfobipSms(
@@ -90,6 +119,8 @@ async function sendInfobipSms(
     throw new Error("INFOBIP_API_KEY environment variable is missing");
   }
 
+  const destination = normalizeSmsDestination(to);
+
   const response = await fetch(`https://${baseUrl}/sms/2/text/advanced`, {
     method: "POST",
     headers: {
@@ -101,7 +132,7 @@ async function sendInfobipSms(
       messages: [
         {
           from: sender,
-          to,
+          destinations: [{ to: destination }],
           text,
         },
       ],
